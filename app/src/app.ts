@@ -4,14 +4,15 @@ import { stageError, stageOf, usable, type SiteConfig } from './core/config';
 import { KIND, sign, template, type Event } from './core/events';
 import { rebuild, type DaoState, type Member } from './core/state';
 import { parseDescriptor } from './core/descriptor';
-import { broadcast, loadTreasury, txStatus, type TreasuryView } from './core/chain';
+import { broadcast, loadTreasury, txStatus, type Broadcast, type TreasuryView, type TxStatus } from './core/chain';
 import { finalizeRound } from './core/round';
 import type { RoundView } from './core/state';
-import { prfSalt, pubkeyOf, unwrapSecret, wrapSecret } from './core/identity';
+import { prfSalt, pubkeyOf, treasuryKeyFromMnemonic, unwrapSecret, wrapSecret } from './core/identity';
 import { parseJson } from './core/util';
+import { t } from './i18n';
 import { query, publish, type PublishResult } from './lib/relays';
 import { createPasskey, credTagOf, getPrf } from './lib/passkey';
-import { prefs, session, store, type LocalIdentity, type PendingFounder } from './lib/store';
+import { prefs, session, store, type LocalIdentity, type PendingFounder, treasuryCache } from './lib/store';
 
 export type Lang = 'it' | 'en';
 
@@ -29,11 +30,15 @@ export interface AppState {
   isCouncil?: boolean;
   treasury?: TreasuryView;
   treasuryError?: string;
+  treasuryAt?: number; // when the shown treasury was read (ms)
+  treasuryLoading?: boolean;
   lang: Lang;
   lastSync?: number;
 }
 
 let state: AppState = { loading: true, events: [], lang: prefs.lang() ?? (navigator.language?.startsWith('it') ? 'it' : 'en') };
+// The page's language is the visitor's choice from the first paint, so browsers do not offer to translate it.
+document.documentElement.lang = state.lang;
 const listeners = new Set<() => void>();
 
 export const getState = () => state;
@@ -84,19 +89,32 @@ function derive(events: Event[], extra: Partial<AppState> = {}) {
 }
 
 const tallied = new Set<string>();
-const broadcasted = new Set<string>();
+/** When this phone last broadcast each round's transaction. */
+const broadcasted = new Map<string, number>();
+/** A broadcast that no source has seen after this long is sent again. */
+const REBROADCAST_MS = 10 * 60_000;
 const receipted = new Set<string>();
+/** What the chain last said about each open round's transaction (filled by council phones' sync, read by the Council page). */
+export const chainSeen = new Map<string, TxStatus>();
 
-const chainApis = () => usable(state.dao?.founded?.config.chainApi ?? []);
+/**
+ * Where the app reads the chain: the site's current list first, then the one recorded at founding.
+ * A source is a site setting, not a rule: it can show data but never move coins (every payment is
+ * checked against the treasury's descriptor), so a DAO can add a source without a vote.
+ */
+/** Confirmations before a receipt: the site's setting, else the founding one, else 3. */
+export const receiptDepth = () => Math.max(1, state.site?.receiptConfirmations ?? state.dao?.founded?.config.receiptConfirmations ?? 3);
+
+export const chainApis = () => [...new Set([...usable(state.site?.chainApi ?? []), ...usable(state.dao?.founded?.config.chainApi ?? [])])];
 
 /** Combine the round's signatures, finalise and broadcast. Anyone may do this; doing it twice is harmless. */
-export async function broadcastRound(r: RoundView): Promise<string> {
+export async function broadcastRound(r: RoundView): Promise<Broadcast> {
   const psbts = r.signEvents.map(e => parseJson<{ psbt: string }>(e.content)!.psbt);
   const { hex } = finalizeRound(psbts);
-  const txid = await broadcast(chainApis(), hex);
-  broadcasted.add(r.inspection!.txid);
+  const sent = await broadcast(chainApis(), hex, r.inspection!.txid);
+  broadcasted.set(sent.txid, Date.now());
   void refreshTreasury();
-  return txid;
+  return sent;
 }
 
 /** Council apps broadcast ready rounds and publish the receipt once the transaction confirms (protocol 6.2, 6.3). */
@@ -107,14 +125,18 @@ async function autoRounds() {
     if (r.status !== 'open' || !r.inspection) continue;
     const txid = r.inspection.txid;
     const st = await txStatus(chainApis(), txid);
-    if (!st && r.ready && !broadcasted.has(txid)) {
+    // Not known to any source: broadcast, and again if a source took it but it never reached the network.
+    if (!st && r.ready && Date.now() - (broadcasted.get(txid) ?? 0) > REBROADCAST_MS) {
       try {
         await broadcastRound(r);
       } catch {
         /* someone else may have broadcast it, or the API is down: try again next sync */
       }
     }
-    if (st?.confirmed && st.block_height && !r.receipt && !receipted.has(txid)) {
+    if (st) chainSeen.set(txid, st);
+    else chainSeen.delete(txid);
+    // The receipt waits for depth: a block can be dropped by a reorg, and a receipt cannot be taken back.
+    if (st?.confirmed && st.block_height && (st.confirmations ?? 0) >= receiptDepth() && !r.receipt && !receipted.has(txid)) {
       receipted.add(txid);
       try {
         await signAndPublish(KIND.receipt, { txid, block_height: st.block_height }, [['e', r.event.id]]);
@@ -173,19 +195,66 @@ export async function sync() {
     secret = session.get(daoId) ?? identity?.plain;
   }
   derive(events, { identity, secret, loading: false, pending });
-  if (daoId && !state.treasury) void refreshTreasury();
+  if (daoId) {
+    if (!state.treasury) {
+      const cached = treasuryCache.get<TreasuryView>(daoId);
+      if (cached) setState({ treasury: cached.view, treasuryAt: cached.at });
+    }
+    // Another open page of this site may have read the treasury since: use its reading rather than asking again.
+    const shared = treasuryCache.get<TreasuryView>(daoId);
+    if (shared && shared.at > (state.treasuryAt ?? 0)) setState({ treasury: shared.view, treasuryAt: shared.at, treasuryError: undefined });
+    // One read at a time, and not on every sync: repeated reads pile up and public APIs throttle them.
+    const age = Date.now() - (state.treasuryAt ?? 0);
+    const sinceTry = Date.now() - lastTreasuryTry;
+    const failedRecently = !!state.treasuryError && sinceTry < TREASURY_RETRY_MS; // after a failure, wait before trying again by itself
+    // A round seen broadcast or confirmed since the last reading changes the treasury: read again whatever its age.
+    const marker = (state.dao?.rounds ?? []).map(r => `${r.event.id}:${r.receipt ? 'c' : r.ready ? 'r' : 'o'}`).join(',');
+    const moved = marker !== lastRoundMarker;
+    lastRoundMarker = marker;
+    if ((moved || age > TREASURY_FRESH_MS) && !failedRecently) void refreshTreasury();
+  }
   void autoTally().then(autoRounds);
 }
 
-export async function refreshTreasury() {
-  const cfg = state.dao?.founded?.config;
-  if (!cfg) return;
-  try {
-    const d = parseDescriptor(cfg.descriptor, cfg.network);
-    setState({ treasury: await loadTreasury(d, cfg.network, usable(cfg.chainApi)), treasuryError: undefined });
-  } catch (e) {
-    setState({ treasuryError: String((e as Error).message ?? e) });
+const TREASURY_FRESH_MS = 5 * 60_000; // a reading older than this is refreshed in the background (the remembered one shows meanwhile); rounds trigger a read at once
+const TREASURY_RETRY_MS = 2 * 60_000; // after a failed read, wait this long before trying again by itself
+let treasuryRead: Promise<void> | undefined;
+let readAgain = false;
+let lastTreasuryTry = 0;
+let lastRoundMarker: string | undefined;
+
+/**
+ * Read the treasury from the chain. Only one read runs at a time. A call made while a read is running
+ * queues one more read after it, so a caller (after a broadcast, say) always gets a read that started later.
+ */
+export function refreshTreasury(): Promise<void> {
+  if (treasuryRead) {
+    readAgain = true;
+    return treasuryRead.then(() => (treasuryRead ? treasuryRead : undefined));
   }
+  const cfg = state.dao?.founded?.config;
+  const daoId = state.dao?.founded?.daoId;
+  if (!cfg || !daoId) return Promise.resolve();
+  lastTreasuryTry = Date.now();
+  setState({ treasuryLoading: true });
+  treasuryRead = (async () => {
+    try {
+      const d = parseDescriptor(cfg.descriptor, cfg.network);
+      const view = await loadTreasury(d, cfg.network, chainApis());
+      treasuryCache.set(daoId, view);
+      setState({ treasury: view, treasuryAt: Date.now(), treasuryError: undefined });
+    } catch (e) {
+      setState({ treasuryError: String((e as Error).message ?? e) });
+    } finally {
+      treasuryRead = undefined;
+      setState({ treasuryLoading: false });
+      if (readAgain) {
+        readAgain = false;
+        void refreshTreasury();
+      }
+    }
+  })();
+  return treasuryRead;
 }
 
 /** Sign with the unlocked key, publish to every relay, and fold the event into local state. */
@@ -280,9 +349,36 @@ export async function restoreFromCard(secret: string, name: string): Promise<'wr
 }
 
 /** The name shown in the phone's passkey list: practice passkeys say so, since stages share a domain. */
+/** The passkey's name in the phone's password manager, dated so an old one can be told from a new one. */
 export function passkeyName(name: string): string {
   const s = state.site ? stageOf(state.site) : 'testnet';
-  return s === 'practice' ? `${name} · ${state.site!.name} (${state.lang === 'en' ? 'practice' : 'prova generale'})` : `${name} · ${state.site?.name ?? ''}`;
+  const day = new Date().toISOString().slice(0, 10);
+  return s === 'practice'
+    ? `${name} · ${state.site!.name} (${state.lang === 'en' ? 'practice' : 'prova generale'}) · ${day}`
+    : `${name} · ${state.site?.name ?? ''} · ${day}`;
+}
+
+/**
+ * Trial stages only: put a council member's test treasury key back on this phone from its 12 words,
+ * after a restore from the identity card (which carries the identity key only). The words must give
+ * exactly the treasury key recorded for this member on the council; anything else is refused.
+ */
+export async function restoreTreasuryKey(words: string): Promise<void> {
+  const { site, dao, identity, me } = state;
+  if (!site || !dao || !identity || !me) throw new Error(t('tk.notMember'));
+  if (site.network === 'mainnet') throw new Error(t('tk.mainnet'));
+  const entry = dao.settingsAt(dao.now).content.council.find(c => dao.personOf(c.identityKey) === me.person);
+  if (!entry) throw new Error(t('tk.notCouncil'));
+  let key;
+  try {
+    key = treasuryKeyFromMnemonic(words.trim().toLowerCase().split(/\s+/).join(' '), site.network);
+  } catch {
+    throw new Error(t('tk.badWords'));
+  }
+  if (key.xpub !== entry.xpub || key.fingerprint !== entry.fingerprint.toLowerCase()) throw new Error(t('tk.wrongKey', { fp: entry.fingerprint }));
+  const next: LocalIdentity = { ...identity, treasury: key };
+  await store.setIdentity(next);
+  setState({ identity: next });
 }
 
 export function signOut() {

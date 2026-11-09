@@ -1,9 +1,9 @@
 import { useState } from 'preact/hooks';
-import { signAndPublish, signOut, useApp } from '../app';
+import { restoreTreasuryKey, signAndPublish, signOut, useApp } from '../app';
 import { KIND } from '../core/events';
 import { fmtDate, t } from '../i18n';
 import { validAddress } from '../core/state';
-import { Address, Footer, Header, PrintCard, ShortCode, errText, go } from './parts';
+import { Address, Footer, Header, PrintCard, ShortCode, errText, go, askConfirm } from './parts';
 
 export function Profile() {
   const app = useApp();
@@ -14,8 +14,24 @@ export function Profile() {
   const [editing, setEditing] = useState(false);
   const [payMsg, setPayMsg] = useState<string>();
   const [busy, setBusy] = useState(false);
+  const [tkWords, setTkWords] = useState('');
+  const [tkMsg, setTkMsg] = useState<string>();
+  const [tkDone, setTkDone] = useState(false);
+  const enterWords = async () => {
+    setTkMsg(undefined);
+    setBusy(true);
+    try {
+      await restoreTreasuryKey(tkWords);
+      setTkWords('');
+      setTkDone(true);
+    } catch (e) {
+      setTkMsg(errText(e));
+    } finally {
+      setBusy(false);
+    }
+  };
   const setStanding = async (address?: string) => {
-    if (!address && !confirm(t('profile.payoutRemoveConfirm'))) return;
+    if (!address && !(await askConfirm(t('profile.payoutRemoveConfirm')))) return;
     setPayMsg(undefined);
     setBusy(true);
     try {
@@ -29,7 +45,7 @@ export function Profile() {
     }
   };
   const leave = async () => {
-    if (!confirm(t('profile.leaveConfirm', { dao }))) return;
+    if (!(await askConfirm(t('profile.leaveConfirm', { dao }), t('profile.leave'), true))) return;
     await signAndPublish(KIND.leave, {});
     setLeft(true);
   };
@@ -50,6 +66,8 @@ export function Profile() {
   const s = app.dao;
   const network = app.site!.network;
   const standing = s?.standingAt(me.key, s.now);
+  // Someone who has left keeps their name and record, but nothing a member does.
+  const former = left || (!!s && !s.memberAt(me.key, s.now));
   const pa = payAddr.trim();
   const payErr = pa && (!validAddress(pa, network) ? t('np.addressBad', { network }) : s?.isTreasuryAddress(pa) ? t('np.addressTreasury') : undefined);
   return (
@@ -63,16 +81,33 @@ export function Profile() {
           <span class="small">{t('profile.code')}</span>
           <ShortCode pubkey={me.key} />
         </div>
-        {app.secret ? <PrintCard council={me.council} /> : <p class="note">{t('profile.locked')}</p>}
+        {former && (
+          <div class="card">
+            <p class="ok">{t('profile.left', { dao })}</p>
+            <p class="small">{t('profile.formerText')}</p>
+            <button type="button" class="btn secondary" onClick={() => go('/candidate')}>{t('profile.joinAgain')}</button>
+          </div>
+        )}
+        {!former && (app.secret ? <PrintCard council={me.council} /> : <p class="note">{t('profile.locked')}</p>)}
+        {me.council && !tk && network !== 'mainnet' && (
+          <div class="card" id="treasury-key">
+            <h3>{t('profile.treasuryKey')}</h3>
+            <p class="warn">{t('tk.missing')}</p>
+            <label class="field">{t('tk.enter')}<textarea class="mono" autoComplete="off" spellcheck={false} autoCapitalize="none" value={tkWords} onInput={e => setTkWords((e.target as HTMLTextAreaElement).value)} /></label>
+            <button type="button" class="btn primary" disabled={busy || tkWords.trim().split(/\s+/).length !== 12} onClick={enterWords}>{t('tk.save')}</button>
+            {tkMsg && <p class="warnbox">{tkMsg}</p>}
+          </div>
+        )}
         {me.council && tk && (
           <div class="card">
             <h3>{t('profile.treasuryKey')}</h3>
+            {tkDone && <p class="ok">{t('tk.done')}</p>}
             <p class="small">{t('profile.treasuryKeyText', { fp: tk.fingerprint })}</p>
             <button type="button" class="btn link" style="align-self:flex-start" onClick={() => setWords(!words)}>{words ? t('profile.hideWords') : t('profile.showWords')}</button>
             {words && <p class="mono" style="font-size:15px;line-height:1.8">{tk.mnemonic}</p>}
           </div>
         )}
-        {app.secret && s && (
+        {app.secret && s && !former && (
           <div class="card">
             <h3>{t('profile.payout')}</h3>
             <p class="small">{t('profile.payoutText')}</p>
@@ -94,10 +129,10 @@ export function Profile() {
             {payMsg && <p class="warnbox">{payMsg}</p>}
           </div>
         )}
-        {app.secret && (
+        {app.secret && !former && (
           <button type="button" class="btn secondary" onClick={() => go('/sponsor')}>{t('profile.sponsor')}</button>
         )}
-        {app.secret && !me.council && (
+        {app.secret && !me.council && !former && (
           <div class="card">
             <h3>{t('profile.leave')}</h3>
             <p class="small">{t('profile.leaveText')}</p>

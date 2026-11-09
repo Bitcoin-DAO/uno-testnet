@@ -1,8 +1,12 @@
-# UNO
+# UNO DAO
 
-**This is UNO's own copy of [btc-dao](https://github.com/Bitcoin-DAO/btc-dao) for the testnet stage** (stage 2 of 3: practice, testnet, mainnet). It runs btc-dao 0.1.0. The site is at **https://bitcoin-dao.github.io/uno-testnet** and is built from `config/dao.json` by `.github/workflows/pages.yml`. Code changes are made in btc-dao and pulled in here; only `config/dao.json`, the charter (`config/charter.it.md`, `config/charter.en.md`) and this note are UNO's own. The mainnet DAO that follows gets its name from its council.
+**This is UNO DAO's own copy of [btc-dao](https://github.com/Bitcoin-DAO/btc-dao) on testnet4.** It runs btc-dao v0.2.0 (commit d562207). The site is at **https://bitcoin-dao.github.io/uno-testnet** and is built from `config/dao.json` by `.github/workflows/pages.yml`. Code changes are made in btc-dao and pulled in here; only `config/dao.json`, the charter (`config/charter.it.md`, `config/charter.en.md`) and this note are UNO DAO's own.
 
-After the founding meeting, add `"daoId": "<the DAO id shown on the setup page>"` to `config/dao.json`.
+**One site for practice and testnet.** UNO DAO replaces the separate practice copy (`uno-practice`, closed on 8 November 2026 after a full run). The founders choose **practice** (10-minute votes) at founding; the members move to **live** 3-day votes by a rule-change vote, and later from phone test keys to SeedSigners by a council change. The DAO, its members and its record carry on throughout. The mainnet DAO that follows is a separate site.
+
+**Chain sources:** the DAO's chain gateway first (`btc-dao-gateway`), mempool.space directly as a fallback.
+
+After founding, add `"daoId": "<the DAO id shown on the setup page>"` to `config/dao.json`, and the id to the relay's list.
 
 ---
 
@@ -35,6 +39,7 @@ All 19 screens are in [`design/`](design/README.md).
 
 | Path | What it holds |
 | --- | --- |
+| `CHANGELOG.md` | What each tagged release changed. A DAO's copy runs one tagged release |
 | `docs/what-is-a-bitcoin-dao.md`, `docs/what-is-a-bitcoin-dao.it.md` | A plain-language introduction, in English and Italian: what a Bitcoin DAO is, how it works, what it can be used for |
 | `docs/wallet-guide.it.md`, `docs/wallet-guide.en.md` | "Your first bitcoin wallet in 5 minutes" for members, in Italian and English |
 | `docs/testnet-treasury.md` | The BTC DAO Testnet Treasury: the organisation's testnet4 wallet that funds every practice and testnet stage and gets the coins back when each one closes |
@@ -49,6 +54,7 @@ All 19 screens are in [`design/`](design/README.md).
 | `docs/test-cases.md` | Test cases every client must pass, test vectors, and the protocol gaps they exposed |
 | `docs/decisions.md` | Decisions taken so far and open questions |
 | `design/` | The mock-up screens (Italian) as source and PNG, plus the spec's diagrams |
+| `site/` | The DAO's own static pages and files (for example an about page), copied next to the app at build. Like `config/`, it belongs to the DAO: updating btc-dao never touches it. Empty here |
 | `app/` | The DAO's website: founding, sign-in, identity cards, treasury, proposals and votes, membership, payout rounds (the phase 1 prototype), with unit and end-to-end tests |
 | `relay/` | The DAO's own Nostr relay: Nosflare set up to keep only the DAO's events, with deployment steps for Cloudflare |
 | `tools/render-mockups/` | Regenerates the screen PNGs from the source files |

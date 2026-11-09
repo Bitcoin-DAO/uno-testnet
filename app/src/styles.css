@@ -110,13 +110,20 @@ label.check input { width: 24px; height: 24px; margin: 0; flex: none; accent-col
 .scanner .btn.secondary { background: transparent; color: #fff; border-color: var(--head-line); }
 .footer { padding: 24px 20px 40px; display: flex; gap: 16px; flex-wrap: wrap; font-size: 14px; }
 
+/* the app's own dialogs */
+.dialog-back { position: fixed; inset: 0; background: rgba(16, 41, 46, 0.6); z-index: 20; display: flex; align-items: center; justify-content: center; padding: 16px; }
+.dialog { max-width: 440px; width: 100%; }
+.btn.danger { background: #8a2b14; color: #fff; }
+
 /* identity card print */
 .print-only { display: none; }
 @media print {
-  @page { size: A4; margin: 15mm; }
-  body * { visibility: hidden; }
-  .print-only, .print-only * { visibility: visible; }
-  .print-only { display: block; position: absolute; left: 0; top: 0; }
+  /* No page margin, so browsers print no header or footer (address, date); the card keeps its own margin. */
+  @page { size: A4; margin: 0; }
+  /* Only the card and the elements that contain it: everything else leaves the layout, so one page prints. */
+  body *:not(:has(.print-only)):not(.print-only):not(.print-only *) { display: none !important; }
+  html, body, body *:has(.print-only) { margin: 0 !important; padding: 0 !important; border: 0 !important; background: #fff !important; box-shadow: none !important; min-height: 0 !important; height: auto !important; }
+  .print-only { display: block; position: absolute; left: 0; top: 0; padding: 15mm; }
 }
 .idcard { width: 85.6mm; min-height: 54mm; border: 0.4mm solid #000; border-radius: 3mm; padding: 4mm; display: flex; gap: 4mm; color: #000; font-family: var(--sans); background: #fff; }
 .idcard .qr { width: 30mm; height: 30mm; flex: none; }

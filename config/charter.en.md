@@ -60,7 +60,8 @@ This charter says what UNO is for and how we work together. Every member accepts
 ## Article 6 · Proposals and voting
 
 1. Any member can make a proposal. The binding text is the proposal's summary, at most 500 characters; a link to the full text is optional.
-2. Votes are yes, no or abstain, for a full [7] days. Every vote is signed and public, and can be changed until the close.
+2. Votes are yes, no or abstain, for a full [3] days. Every vote is signed and public, and can be changed until the close.
+   **Practice mode.** At founding, the DAO may start in practice mode, with 10-minute votes, to try every step in a short time. It moves to [3]-day votes by a rule-change vote; the members, the record and the treasury stay the same.
 3. A proposal is valid if at least [one third] of those entitled to vote take part; abstentions count towards quorum.
 4. **Simple majority** for payments, statements and new members. **Two thirds** for removals, rule changes, council changes, changes to this charter and closing the DAO.
 5. At the close a council member signs the final count, which fixes the result and the proposal's number.

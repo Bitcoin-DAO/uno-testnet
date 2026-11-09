@@ -1,14 +1,42 @@
 // Council inbox: counts, member list and rules versions, key replacements, checking candidates.
 import { useState } from 'preact/hooks';
-import { signAndPublish, useApp } from '../app';
+import { chainSeen, signAndPublish, useApp } from '../app';
 import { t } from '../i18n';
 import { KIND, type Event } from '../core/events';
 import { parseFounderCode, type FounderCode } from '../core/identity';
 import { formatShortCode, shortCode } from '../core/shortcode';
-import { nextRoster, nextSettings, type Candidate, type DaoState, type Verified } from '../core/state';
+import { nextRoster, nextSettings, type Candidate, type DaoState, type RekeyView, type Verified } from '../core/state';
 import { hashJson, parseJson } from '../core/util';
-import { Footer, Header, ScanModal, ShortCode, errText } from './parts';
+import { CouncilOnly, Footer, Header, ScanModal, ShortCode, errText } from './parts';
 import { useNameOf } from './Proposals';
+
+/**
+ * Key replacements still able to happen. One whose new key is already in use, or whose old key is no longer
+ * the member's, can never complete (two council members started the same one, or a later one won): it is hidden.
+ */
+export function liveRekeys(s: DaoState): RekeyView[] {
+  return s.rekeys.filter(r => r.effectiveAt === undefined && s.personOf(r.newKey) === r.newKey && s.keyOf(s.personOf(r.oldKey)) === r.oldKey);
+}
+
+/** Council members other than the given person, today. */
+function otherCouncil(s: DaoState, person: string): number {
+  const council = s.settings[s.settings.length - 1].content.council.map(c => s.personOf(c.identityKey));
+  return council.filter(p => p !== person).length;
+}
+
+/** A council member's key can be replaced only if the others reach the threshold without them. */
+export function rekeyBlocked(s: DaoState, oldKey: string): boolean {
+  const person = s.personOf(oldKey);
+  const settings = s.settings[s.settings.length - 1].content;
+  const onCouncil = settings.council.some(c => s.personOf(c.identityKey) === person);
+  return onCouncil && otherCouncil(s, person) < settings.threshold;
+}
+
+/** The open round's transaction is already on the network (as this phone last saw it). */
+const roundOnChain = (s: DaoState) => {
+  const r = s.rounds.find(x => x.status === 'open');
+  return !!(r?.ready && r.inspection && chainSeen.get(r.inspection.txid));
+};
 
 /** How many things wait for this council member. */
 export function councilTodo(s: DaoState, myPerson: string): number {
@@ -20,9 +48,9 @@ export function councilTodo(s: DaoState, myPerson: string): number {
   };
   n += open(s.rosterCandidates, s.pendingRoster);
   n += open(s.settingsCandidates, s.pendingSettings);
-  n += s.rekeys.filter(r => r.effectiveAt === undefined && !r.endorsers.includes(myPerson)).length;
+  n += liveRekeys(s).filter(r => !r.endorsers.includes(myPerson) && !rekeyBlocked(s, r.oldKey)).length;
   const openR = s.rounds.find(r => r.status === 'open');
-  if (openR ? !openR.signatures.has(myPerson) || openR.ready : [...s.payments.values()].some(p => p.status === 'waiting')) n++;
+  if (openR ? !openR.signatures.has(myPerson) || (openR.ready && !roundOnChain(s)) : [...s.payments.values()].some(p => p.status === 'waiting')) n++;
   return n;
 }
 
@@ -38,15 +66,7 @@ export function Council() {
   const [oldKey, setOldKey] = useState('');
   const [done, setDone] = useState<string>();
 
-  if (!app.isCouncil || !app.secret || !app.me) {
-    return (
-      <>
-        <Header />
-        <main><p class="lead">{t('cn.notCouncil')}</p></main>
-        <Footer />
-      </>
-    );
-  }
+  if (!app.isCouncil || !app.secret || !app.me) return <CouncilOnly />;
   const me = app.me.person;
   const m = s.settings[s.settings.length - 1].content.threshold;
 
@@ -112,6 +132,9 @@ export function Council() {
       <Header />
       <main>
         <h1>{t('cn.title')}</h1>
+        {app.identity && !app.identity.treasury && app.site!.network !== 'mainnet' && (
+          <p class="warnbox">{t('tk.missing')} <a href="#/profile">{t('tk.link')}</a></p>
+        )}
         {s.rosterDisputed && <p class="warnbox">{t('cn.disputed')}</p>}
 
         {(waitingPay > 0 || openR) && (
@@ -119,7 +142,7 @@ export function Council() {
             <h3>{t('cn.round')}</h3>
             {openR ? (
               <>
-                <p class="small">{openR.ready ? t('cn.roundReady', { round: openR.content.round }) : openR.signatures.has(me) ? t('rd.signatures', { n: openR.signatures.size, m: openR.threshold }) : t('cn.roundSign', { round: openR.content.round })}</p>
+                <p class="small">{openR.ready && roundOnChain(s) ? t('cn.roundOnChain', { round: openR.content.round }) : openR.ready ? t('cn.roundReady', { round: openR.content.round }) : openR.signatures.has(me) ? t('rd.signatures', { n: openR.signatures.size, m: openR.threshold }) : t('cn.roundSign', { round: openR.content.round })}</p>
                 <a class="btn primary" style="display:flex;align-items:center;justify-content:center;text-decoration:none" href={`#/round/${openR.event.id}`}>{t('cn.open')}</a>
               </>
             ) : (
@@ -142,14 +165,15 @@ export function Council() {
         {versionBlock(t('cn.settings'), t('cn.settingsText', { n: s.pendingSettings.length, v: lastSettings }), s.settingsCandidates, s.pendingSettings, lastSettings + 1,
           t('cn.settingsPublish', { v: lastSettings + 1 }), t('cn.settingsEndorse', { v: lastSettings + 1 }), () => nextSettings(s), KIND.settings, 'settings')}
 
-        {s.rekeys.some(r => r.effectiveAt === undefined) && (
+        {liveRekeys(s).length > 0 && (
           <section class="card">
             <h3>{t('cn.rekeys')}</h3>
-            {s.rekeys.filter(r => r.effectiveAt === undefined).map(r => (
+            {liveRekeys(s).map(r => (
               <div class="stack" style="gap:6px">
                 <strong>{t('cn.rekeyItem', { name: nameOf(r.oldKey), code: formatShortCode(shortCode(r.newKey)) })}</strong>
                 <span class="small">{t('cn.approvals', { n: r.endorsers.length, m })} · {r.mode === 'remote' ? t('cn.remote') : t('cn.inPerson')}</span>
                 {r.needsSecondVerify && <span class="small">{t('cn.rekeyNeedsVerify')}</span>}
+                {rekeyBlocked(s, r.oldKey) && <span class="small warn">{t('cn.rekeyBlocked', { name: nameOf(r.oldKey), m })}</span>}
                 {r.endorsers.includes(me) ? <span class="ok">{t('cn.youApproved')}</span> : (
                   <button type="button" class="btn primary" disabled={busy} onClick={() => run(() => endorse(r.event, 'rekey'))}>{t('cn.approve')}</button>
                 )}
@@ -200,13 +224,15 @@ export function Council() {
                   </select>
                 </label>
               )}
+              {code.purpose === 'replace' && oldKey && rekeyBlocked(s, oldKey) && <p class="warnbox">{t('cn.rekeyBlocked', { name: nameOf(oldKey), m })}</p>}
+              {code.purpose === 'replace' && liveRekeys(s).some(r => r.newKey === code.c.key || (oldKey && r.oldKey === oldKey)) && <p class="warnbox">{t('cn.rekeyExists')}</p>}
               {code.purpose === 'verify' ? (
                 <button type="button" class="btn primary" disabled={busy} onClick={() => run(
                   () => signAndPublish(KIND.verify, { candidate_key: code.c.key, mode, short_code: shortCode(code.c.key) }, [['p', code.c.key]]),
                   t('cn.verifyDone', { name: code.c.name }),
                 )}>{t('cn.sign')}</button>
               ) : (
-                <button type="button" class="btn primary" disabled={busy || !oldKey} onClick={() => run(async () => {
+                <button type="button" class="btn primary" disabled={busy || !oldKey || rekeyBlocked(s, oldKey) || liveRekeys(s).some(r => r.newKey === code.c.key || r.oldKey === oldKey)} onClick={() => run(async () => {
                   const { event } = await signAndPublish(KIND.rekey, { old_key: oldKey, new_key: code.c.key, mode, short_code: shortCode(code.c.key) }, [['p', oldKey], ['p', code.c.key]]);
                   await endorse(event, 'rekey');
                 }, t('cn.replaceDone', { m }))}>{t('cn.replaceSign')}</button>

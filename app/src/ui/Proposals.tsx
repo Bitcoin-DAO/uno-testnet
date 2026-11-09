@@ -8,6 +8,7 @@ import { formatShortCode, shortCode } from '../core/shortcode';
 import { parseJson } from '../core/util';
 import { Address, Footer, Header, errText, go } from './parts';
 import { PaymentLine } from './Round';
+import { cadenceOf } from '../core/time';
 
 export const typeLabel = (type: string) => t(`type.${type}` as 'type.payout');
 
@@ -130,12 +131,22 @@ export function ProposalDetail({ id }: { id: string }) {
       setBusy(false);
     }
   };
+  const link = `${app.site!.site.replace(/\/$/, '')}/#/confirm/${p.event.id}`;
   const copyLink = async () => {
     try {
-      await navigator.clipboard.writeText(`${app.site!.site.replace(/\/$/, '')}/#/confirm/${p.event.id}`);
+      await navigator.clipboard.writeText(link);
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
     } catch { /* ignore */ }
+  };
+  // One message the recipient can trust before opening it: which DAO, which payment, how much, then the link.
+  const shareLink = async () => {
+    const amount = ((p.content.payload.outputs as Output[] | undefined) ?? []).reduce((a, o) => a + o.amount_sat, 0);
+    const text = t('pd.shareText', { label: proposalLabel(app.site!.name, p.number), title: p.content.title, amount: fmtSats(amount), link });
+    try {
+      if (navigator.share) await navigator.share({ text });
+      else await navigator.clipboard.writeText(text);
+    } catch { /* cancelled */ }
   };
 
   const record = app.events
@@ -176,7 +187,12 @@ export function ProposalDetail({ id }: { id: string }) {
                 )}
               </div>
             ))}
-            {!p.confirmed && <button type="button" class="btn secondary" onClick={copyLink}>{copied ? t('home.copied') : t('pd.confirmLink')}</button>}
+            {!p.confirmed && (
+              <>
+                <button type="button" class="btn secondary" onClick={shareLink}>{t('pd.shareLink')}</button>
+                <button type="button" class="btn link" style="align-self:flex-start" onClick={copyLink}>{copied ? t('home.copied') : t('pd.confirmLink')}</button>
+              </>
+            )}
           </section>
         )}
 
@@ -289,7 +305,27 @@ function Payload({ p }: { p: ProposalView }) {
   }
 }
 
-export const EDITABLE_RULES = ['votingPeriodDays', 'quorum', 'payoutRound', 'lapseAfterRounds', 'maxFeeRateSatVb', 'treasuryCapSats'] as const;
+export const EDITABLE_RULES = ['votingPeriodDays', 'quorum', 'payoutRound', 'lapseAfterRounds', 'maxFeeRateSatVb', 'feePolicy', 'treasuryCapSats'] as const;
+
+/** A voting period in words: practice votes in minutes, short ones in hours, the rest in days. */
+export function periodText(days: number): string {
+  const minutes = Math.round(days * 24 * 60);
+  if (minutes < 120) return t('period.minutes', { n: minutes });
+  if (days < 2) return t('period.hours', { n: Math.round(days * 24) });
+  return t('setup.days', { n: Number(days.toFixed(2)) });
+}
+
+/** A rule's value as members read it. */
+export function ruleValue(key: string, v: unknown): string {
+  switch (key) {
+    case 'votingPeriodDays': return typeof v === 'number' ? periodText(v) : String(v);
+    case 'payoutRound': return cadenceOf(v as string) === 'weekly' ? t('setup.weekly') : t('setup.monthly');
+    case 'feePolicy': return v === 'economical' ? t('fee.economical') : t('fee.fast');
+    case 'maxFeeRateSatVb': return `${v} sat/vB`;
+    case 'treasuryCapSats': return `${fmtSats(Number(v))} sats`;
+    default: return String(v);
+  }
+}
 
 export function ruleLabel(key: string) {
   switch (key) {
@@ -299,6 +335,7 @@ export function ruleLabel(key: string) {
     case 'treasuryCapSats': return t('setup.cap');
     case 'lapseAfterRounds': return t('np.ruleLapse');
     case 'payoutRound': return t('setup.payouts');
+    case 'feePolicy': return t('fee.label');
     default: return key;
   }
 }

@@ -46,3 +46,5 @@ A practice or testnet stage ends by closing the DAO, which sends the whole balan
 | Date | Stage | Out (sats) | Back (sats) | Note |
 | --- | --- | --- | --- | --- |
 | 2026-11-05 | — | | | Top-up: 100,000 sats from the maintainer's own testnet4 wallet into the new treasury wallet (`2N5SK…Vn2S`) |
+| 2026-11-06 | uno-practice | 10,000 | | Funding UNO's practice treasury (2 of 2). Tx `490e04f094c3e5e3c370e305b4107ea15eb8656d408d336b83456f54a824f801`, fee 987 sats; change 89,013 sats back to the treasury wallet |
+| 2026-11-08 | uno-practice | | 4,541 | UNO's practice closed: round 2026-W45, block 159889. Tx `2d530f254fd507150c61e61f9a04d2ce856ac5866cdbd5f551619b2485d0d802`, fee 278 sats. Of the 10,000 lent: 5,000 paid out in round 2026-11 (fee 181), 278 closing fee, 4,541 back |

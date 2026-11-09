@@ -198,12 +198,12 @@ Common fields: `type`, `title` (≤ 80 characters), `summary` (≤ 500 character
 
 | `type` | `payload` |
 | --- | --- |
-| `payout` | `recipient` (display name), `outputs`: 1 to 10 `{address, amount_sat, member?}`, each address once; `member`, optional, is the identity key of the member an output pays (section 4.2) |
+| `payout` | `recipient` (display name), `outputs`: 1 to 10 `{address, amount_sat, member?}`, each address once; `member`, optional, is the identity key of the member an output pays (section 4.2); `category`, optional: `general` (the default when absent), `operations` or `distribution` (section 4.1.1) |
 | `statement` | `{}` |
 | `add_member` | `candidate_key`, `name`, `verify`: ids of the `dao.verify` events |
 | `remove_member` | `member_key`, `reason` |
 | `change_rules` | `changes`: list of `{path, from, to}`, where `path` is `rules.<name>` for a top-level rule and `from` must equal the value in force when the change is applied |
-| `change_council` | `out_key`, `in_key`, `in_xpub`, `in_fingerprint`, `threshold`, `new_descriptor` |
+| `change_council` | `reason`: `resignation`, `recall`, `lost_key`, `rotation` or `threshold`; `out_key`, `in_key`, `in_xpub`, `in_fingerprint` (each may be `null`, see section 4.1.2); `threshold`, `new_descriptor` |
 | `close` | `destination`: the address that receives the whole balance |
 
 The human-readable number (`UNO-0007`) is not in the proposal event. Clients derive it by sorting all valid proposals by `created_at`, then by `id`, and numbering from 1, so every client shows the same numbers without a coordinator. The proposal's tally records the number (section 4.4), and from then on it never changes. A proposal dated before the most recently tallied proposal is rejected, so a backdated proposal can never renumber a closed one; one dated before an open proposal it arrived after is accepted and flagged as backdated.
@@ -213,7 +213,32 @@ Valid when:
 - its `created_at` is not earlier than that of the most recently tallied proposal;
 - the content matches the schema for its type;
 - for payouts, every address is valid for the DAO's network, is not a treasury address (the first 40 receive and change addresses of every descriptor so far), and every amount is above the dust limit of 546 sats; the same address checks apply to a `close` destination;
-- for `add_member`, every listed `dao.verify` is valid: one in-person verification, or two remote verifications by distinct council members, with the same `candidate_key`.
+- for `add_member`, every listed `dao.verify` is valid: one in-person verification, or two remote verifications by distinct council members, with the same `candidate_key`;
+- for `change_council`, the rules in section 4.1.2 hold.
+
+#### 4.1.1 Payout categories
+
+`category` says what a payout is for, so the work that keeps a DAO running is visible rather than folded into general spending.
+
+| `category` | Use |
+| --- | --- |
+| `general` | Anything else: a purchase, a grant to a project, a donation. The default when the field is absent |
+| `operations` | Paid work or costs that keep the DAO itself running: maintaining hardware, running the relay or site, chasing pool payouts, organising key ceremonies, a council member's travel to a signing |
+| `distribution` | A share of income paid out to members as members, such as Sun to Sats' weekly mining distribution |
+
+The category is informational. Clients check only that it is one of the three values and enforce nothing else from it; any other value makes the proposal invalid. Dashboards total payouts by category (`dashboard-spec.md`). A proposer chooses the category; members who think it is wrong vote against, as with any other part of the summary.
+
+#### 4.1.2 Council changes
+
+A `change_council` proposal changes who holds the treasury keys, the threshold, or both. Because keys cannot be removed from a multisig, every council change moves the whole treasury to a new descriptor (section 6.1).
+
+- **One change per proposal:** at most one key out and one key in. `out_key` alone (with the three `in_` fields `null`) shrinks the council, for example a recall with no replacement ready. `in_key` alone grows it. Both set is a replacement. Both `null` changes only the threshold, and then `reason` must be `threshold`.
+- **Reasons:** `resignation` (the member asked to step down), `recall` (members are removing a keyholder), `lost_key` (a treasury seed is lost or exposed), `rotation` (a planned change, such as a term ending), `threshold` (only the threshold changes). The reason is recorded so dashboards can count council turnover by cause; it does not change how the proposal is counted.
+- **Keys:** `out_key` must be a current council member. `in_key` must be a member on the roster and not on the council; `in_xpub` and `in_fingerprint` must be a valid xpub for the DAO's network at the path in section 1.4, with a matching fingerprint.
+- **Threshold:** at least 1 and at most the size of the new council.
+- **Descriptor:** `new_descriptor` must be exactly the descriptor a client derives from the new council's xpubs (the current council's, minus `out_key`'s, plus `in_xpub`, in council order with the incoming key last) and the new threshold, in the same script type as the current descriptor. A client rebuilds it and rejects the proposal if it differs. This is what ties the migration's destination to the keys members voted for: a migration round can only pay an address the members could have checked.
+
+The majority needed is set by `twoThirdsMajority` in the rules (two thirds in the reference rules, as for `close`).
 
 ### 4.2 `dao.confirm`
 
@@ -314,6 +339,10 @@ Every client that shows the round rebuilds the expected outputs and refuses to o
 **Closing round:** after a `close` proposal passes, is tallied and its destination is confirmed, the next round pays the whole treasury balance, minus the fee, to the destination, with no change output. After its receipt, `threshold` council members endorse a final settings version with `"closed": true`, whose `basis` is the `close` proposal. From its effective time clients accept no new proposals, votes or rounds; the record stays readable.
 
 **Sweeping an old treasury:** after a council change, clients keep watching every earlier descriptor. Anything that arrives there is moved by a sweep round: its inputs are on the earlier descriptor, its single output pays the current treasury's next receive address, and it is signed by council keys that belong to both descriptors. A sweep round is exempt from the one-open-round rule.
+
+A sweep works only if the continuing keys can still meet the old descriptor's threshold. When they cannot (a 2-of-2 council replacing one key, or a 3-of-5 council that has changed three keys since that descriptor), the app says so before the migration round is offered for signing, and the old treasury is shown as **unsweepable** from the migration's receipt. Anything sent there afterwards can be recovered only with the outgoing member's key. The outgoing member then keeps their SeedQR card and plate sealed, rather than destroying them, until `threshold` council members endorse a statement closing the sweep window; a `lost_key` or `recall` change has no such option, and the app warns that late arrivals may be lost.
+
+**Who may sign a migration round:** the current council, as for any round. A recalled member's signature counts like any other until the new settings take effect; the vote, not the outgoing member's cooperation, decides the change, because the remaining keys meet the threshold. If they do not (the change removes a key and fewer than `threshold` of the others are available), the migration cannot be signed and the app says so before the vote opens.
 
 PSBT requirements, so hardware signers can verify everything: PSBT version 0; each input carries its `witness_utxo`, `witness_script` and `bip32_derivation` for all five keys; the change output carries its `witness_script` and `bip32_derivation` for all five keys. PSBTs move to and from SeedSigner as animated QR codes in the UR `crypto-psbt` format.
 

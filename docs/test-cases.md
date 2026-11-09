@@ -73,6 +73,16 @@ Cases marked with a gap number tested a rule `protocol.md` did not settle when t
 | P-11 | Add-member proposal with two remote verifications, both by A | Rejected: two distinct council members needed | 4.1 |
 | P-12 | Add-member proposal whose verification is for a different key | Rejected | 4.1 |
 | P-13 | Payout to a member (recipient is F1) | F1's vote counts like any other (Gap 5 dropped) | 4.3 |
+| P-14 | Payout with `category: "operations"` | Accepted; dashboard counts it under operations | 4.1.1 |
+| P-15 | Payout with no `category` | Accepted as `general` | 4.1.1 |
+| P-16 | Payout with `category: "wages"` | Rejected: unknown category | 4.1.1 |
+| P-17 | Change-council replacing A with M, `new_descriptor` derived from B, C, D, E, M and threshold 3 | Accepted | 4.1.2 |
+| P-18 | As P-17, but `new_descriptor` uses an xpub that is not M's `in_xpub` | Rejected: descriptor does not match the voted keys | 4.1.2 |
+| P-19 | Change-council with `in_key` already on the council, or not on the roster | Rejected | 4.1.2 |
+| P-20 | Change-council, reason `recall`, `out_key` A, no incoming key, threshold 3, new 3-of-4 descriptor | Accepted | 4.1.2 |
+| P-21 | Change-council shrinking to four keys with threshold 5 | Rejected: threshold above council size | 4.1.2 |
+| P-22 | Change-council with both keys `null` and reason `resignation` | Rejected: a threshold-only change needs reason `threshold` | 4.1.2 |
+| P-23 | Change-council with no `reason` | Rejected | 4.1.2 |
 
 ## 5. Recipient confirmations
 
@@ -182,6 +192,9 @@ Cases marked with a gap number tested a rule `protocol.md` did not settle when t
 | P-R12 | A second round published while the first is open, with no shared input | Sign refused (Gap 12) | 6.1 |
 | P-R12b | Replacement round sharing an input with the open round | Sign offered; whichever confirms first voids the other | 6.1 |
 | P-R13 | Change-council migration round sending everything to the new descriptor | Sign offered; after its receipt, the new settings version takes the council and descriptor | 6.1, 3.4 |
+| P-R14 | 2-of-2 council replaces B with M: migration round prepared | Sign offered, with a warning that the old treasury will be unsweepable; B is told to keep their card and plate sealed | 6.1 |
+| P-R15 | 2-of-2 council, recall of B, B does not sign | Migration cannot be signed; the app says so before the vote opens | 6.1 |
+| P-R16 | 3-of-5 council recalls A; B, C, D sign the migration without A | Signed and broadcast; after the receipt A is off the council | 6.1, 3.4 |
 | P-W01 | `payoutRound: "weekly"`, Europe/Rome: round dates after Wed 4 Nov 2026 | Mon 9 Nov 00:00, Mon 16 Nov 00:00 (local) | 6.1 |
 | P-W02 | Weekly round prepared on Fri 1 Jan 2027 | Label `2026-W53` | 6.1 |
 | P-W03 | Weekly round prepared on Mon 4 Jan 2027 | Label `2027-W01` | 6.1 |

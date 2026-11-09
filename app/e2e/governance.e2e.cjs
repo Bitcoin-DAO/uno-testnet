@@ -36,7 +36,7 @@ const copied = page => page.evaluate(() => navigator.clipboard.readText());
 async function signUp(page, name, council) {
   await page.goto(URL0 + '#/founder');
   await page.getByRole('textbox').fill(name);
-  if (council) await page.getByLabel('Faccio parte del Consiglio').check();
+  if (council) await page.getByLabel('Chiedo un posto nel Consiglio').check();
   await page.getByLabel(/Ho almeno 18 anni/).check();
   await page.getByRole('button', { name: 'Avanti' }).click();
   await page.getByRole('button', { name: 'Crea con impronta o volto' }).click();
@@ -58,7 +58,8 @@ async function open(page, hash) {
 async function vote(page, id, choice) {
   await open(page, `#/p/${id}`);
   await page.getByRole('button', { name: choice, exact: true }).click();
-  await page.getByText(/Il tuo voto:/).waitFor({ timeout: 15000 });
+  // Wait for this vote, not any earlier one still on the page.
+  await page.getByText(new RegExp(`Il tuo voto: ${choice}\\.`)).waitFor({ timeout: 15000 });
 }
 
 async function councilAction(page, buttonName) {
@@ -178,7 +179,8 @@ async function councilAction(page, buttonName) {
   await vote(f2, payoutId, 'Sì'); // changed
   await vote(f2, rulesId, 'Astenuto');
   await open(f2, `#/p/${payoutId}`);
-  check(await f2.locator('.kv', { hasText: 'Sì' }).first().innerText().then(t => t.includes('5')), 'changed vote counted once: 5 yes');
+  // Votes arrive from the relays over a few seconds: wait for the count rather than reading it once.
+  check(await seen(f2.locator('.kv').filter({ hasText: /^Sì\s*5$/ })), 'changed vote counted once: 5 yes');
   await shot(f2, '05-voting');
   check(!(await n.getByText('Sì', { exact: true }).isVisible()), 'candidate cannot vote');
 
@@ -217,7 +219,10 @@ async function councilAction(page, buttonName) {
   log('@marta leaves; the next list drops her');
   await open(f2, '#/profile');
   await f2.getByRole('button', { name: 'Lascia la DAO' }).click();
+  // The app's own confirmation dialog, in the app's language.
+  await f2.locator('.dialog').getByRole('button', { name: 'Lascia la DAO' }).click();
   await f2.getByText('Hai lasciato UNO.').waitFor({ timeout: 15000 });
+  check(!(await f2.getByRole('button', { name: 'Proponi un nuovo membro' }).count()), 'a former member is offered no member actions');
   await councilAction(a, 'Pubblica la versione 3');
   await councilAction(B.page, 'Approva la versione 3');
   await councilAction(C.page, 'Approva la versione 3');
@@ -250,6 +255,7 @@ async function councilAction(page, buttonName) {
   await open(e2, '#/lost');
   await e2.getByRole('button', { name: 'Proteggi la chiave e continua' }).click({ timeout: 20000 });
   await e2.getByText('La tua nuova chiave è nell\'elenco ✓').waitFor({ timeout: 20000 });
+  await e2.getByText('Stampa la tua tessera d\'identità').waitFor({ timeout: 20000 }); // protected: the passkey step has finished
   await open(e2, '#/members');
   check(await seen(e2.getByText('@elena (tu)')), 'new phone is @elena');
   await open(e2, `#/p/${payoutId}`);

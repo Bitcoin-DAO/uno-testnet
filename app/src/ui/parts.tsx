@@ -1,10 +1,10 @@
-import type { ComponentChildren } from 'preact';
+import { render, type ComponentChildren } from 'preact';
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { setLang, useApp } from '../app';
 import { t } from '../i18n';
 import { qrMatrix, startScanner, type Scanner } from '../lib/qr';
 import { rpId } from '../lib/passkey';
-import { stageOf } from '../core/config';
+import { isPracticeVotes, stageOf } from '../core/config';
 import { cardPayload } from '../core/identity';
 import { shortCode, formatShortCode } from '../core/shortcode';
 import { fmtDate } from '../i18n';
@@ -25,6 +25,10 @@ export function Header(props: { sub?: string; tabs?: ComponentChildren }) {
   const site = app.site;
   const signedIn = !!app.secret && !!app.me;
   const dev = site && !rpId(site.passkeyDomain).matches;
+  // A testnet DAO in practice mode: its votes, as the rules stand now (or as the site file proposes before founding).
+  const settings = app.dao?.settings;
+  const votingDays = settings?.length ? settings[settings.length - 1].content.rules.votingPeriodDays : site?.rules.votingPeriodDays;
+  const practiceVotes = votingDays !== undefined && isPracticeVotes(votingDays);
   return (
     <>
       <header class="top">
@@ -44,7 +48,11 @@ export function Header(props: { sub?: string; tabs?: ComponentChildren }) {
         </div>
       </header>
       {site && stageOf(site) === 'practice' && <div class="banner"><strong>{t('banner.practice')}</strong> {t('banner.practiceText')}</div>}
-      {site && stageOf(site) === 'testnet' && <div class="banner">{t('banner.trial')}</div>}
+      {site && stageOf(site) === 'testnet' && (practiceVotes ? (
+        <div class="banner"><strong>{t('banner.practiceMode')}</strong> {t('banner.practiceModeText')}</div>
+      ) : (
+        <div class="banner">{t('banner.trial')}</div>
+      ))}
       {app.dao?.conflict && <div class="banner">{t('banner.conflict')}</div>}
       {dev && <div class="banner">{t('banner.devPasskey', { host: location.hostname, domain: site!.passkeyDomain })}</div>}
       {props.tabs}
@@ -184,5 +192,60 @@ export function PrintCard(props: { council: boolean }) {
       <p class="small">{t('card.printNote')}</p>
       <IdentityCardPrint daoId={app.daoId} secret={app.secret} name={app.me.name} pubkey={app.me.key} council={app.me.council} />
     </div>
+  );
+}
+
+/** The app's own confirmation and question dialogs, in its language (the browser's name the site and look foreign). */
+function dialog<T>(body: (done: (v: T) => void) => ComponentChildren): Promise<T> {
+  return new Promise(resolve => {
+    const host = document.createElement('div');
+    document.body.appendChild(host);
+    const done = (v: T) => {
+      render(null, host);
+      host.remove();
+      resolve(v);
+    };
+    render(<div class="dialog-back"><div class="dialog card" role="dialog" aria-modal="true">{body(done)}</div></div>, host);
+  });
+}
+
+export function askConfirm(text: string, yes = t('dlg.ok'), danger = false): Promise<boolean> {
+  return dialog<boolean>(done => (
+    <>
+      <p>{text}</p>
+      <button type="button" class={danger ? 'btn danger' : 'btn primary'} onClick={() => done(true)}>{yes}</button>
+      <button type="button" class="btn secondary" onClick={() => done(false)}>{t('dlg.cancel')}</button>
+    </>
+  ));
+}
+
+export function askText(text: string): Promise<string | null> {
+  let value = '';
+  return dialog<string | null>(done => (
+    <>
+      <label class="field">{text}<textarea onInput={e => (value = (e.target as HTMLTextAreaElement).value)} /></label>
+      <button type="button" class="btn primary" onClick={() => done(value.trim() || null)}>{t('dlg.ok')}</button>
+      <button type="button" class="btn secondary" onClick={() => done(null)}>{t('dlg.cancel')}</button>
+    </>
+  ));
+}
+
+/** A council page opened by someone else: say so, and if they are signed out, offer the ways back in. */
+export function CouncilOnly() {
+  const app = useApp();
+  return (
+    <>
+      <Header />
+      <main>
+        <p class="lead">{t('cn.notCouncil')}</p>
+        {!app.secret && (
+          <>
+            <button type="button" class="btn primary" onClick={() => go('/join')}>{t('nav.signin')}</button>
+            <button type="button" class="btn link" onClick={() => go('/restore')}>{t('join.restore')}</button>
+          </>
+        )}
+      </main>
+      <Footer />
+    </>
   );
 }

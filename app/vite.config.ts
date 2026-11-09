@@ -1,7 +1,7 @@
 import { defineConfig, type Plugin } from 'vite';
 import preact from '@preact/preset-vite';
-import { existsSync, readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
+import { resolve, relative, sep } from 'node:path';
 import { execSync } from 'node:child_process';
 
 // The DAO's config file becomes dao.json next to the page.
@@ -33,7 +33,7 @@ function daoConfig(): Plugin {
       const cfg = JSON.parse(pick());
       const ok = (u: string) => !/\[/.test(u);
       const relays = (cfg.relays as string[]).filter(ok);
-      const apis = (cfg.chainApi as string[]).filter(ok).map(u => new URL(u).origin);
+      const apis = (cfg.chainApi as string[]).filter(ok).map(u => new URL(u.replace(/^blockbook:/i, '')).origin); // "blockbook:<address>" sources too
       const dev = ctx.server ? ' ws: http://localhost:* http://127.0.0.1:*' : '';
       const csp = [
         "default-src 'self'",
@@ -48,6 +48,39 @@ function daoConfig(): Plugin {
         "object-src 'none'",
       ].join('; ');
       return html.replace('<!-- CSP: added at build from the DAO config -->', `<meta http-equiv="Content-Security-Policy" content="${csp}" />`);
+    },
+  };
+}
+
+// The DAO's own static files (an about page, images): everything in ../site is copied next to the app.
+// site/ belongs to the DAO, like config/: updating btc-dao never touches it.
+const siteDir = resolve(__dirname, '../site');
+function siteFiles(): string[] {
+  if (!existsSync(siteDir)) return [];
+  const walk = (d: string): string[] =>
+    readdirSync(d).flatMap(n => {
+      const f = resolve(d, n);
+      return statSync(f).isDirectory() ? walk(f) : [f];
+    });
+  return walk(siteDir).filter(f => relative(siteDir, f) !== 'README.md'); // the folder's own note stays out of the site
+}
+function daoSite(): Plugin {
+  return {
+    name: 'dao-site',
+    configureServer(server) {
+      server.middlewares.use((req, res, next) => {
+        const path = decodeURIComponent((req.url ?? '').split('?')[0]).replace(/^\/+/, '');
+        const file = siteFiles().find(f => relative(siteDir, f).split(sep).join('/') === path);
+        if (!file) return next();
+        res.end(readFileSync(file));
+      });
+    },
+    generateBundle() {
+      for (const f of siteFiles()) {
+        const fileName = relative(siteDir, f).split(sep).join('/');
+        if (fileName === 'index.html' || fileName === 'dao.json') throw new Error(`site/${fileName} would replace the app's own file`);
+        this.emitFile({ type: 'asset', fileName, source: readFileSync(f) });
+      }
     },
   };
 }
@@ -73,7 +106,7 @@ if (!build) {
 
 export default defineConfig({
   base: './',
-  plugins: [preact(), daoConfig()],
+  plugins: [preact(), daoConfig(), daoSite()],
   resolve: { alias: [{ find: /^@charter/, replacement: charterFile }] },
   define: {
     __APP_VERSION__: JSON.stringify(pkg.version),

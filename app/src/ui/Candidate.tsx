@@ -8,7 +8,7 @@ import { formatShortCode, shortCode } from '../core/shortcode';
 import { parseJson } from '../core/util';
 import { createPasskey, passkeysAvailable } from '../lib/passkey';
 import { store, type PendingFounder } from '../lib/store';
-import { Footer, Header, PrintCard, Qr, ShortCode, errText, go } from './parts';
+import { Footer, Header, PrintCard, Qr, ShortCode, errText, go, askConfirm } from './parts';
 import { statusText } from './Proposals';
 
 export function Candidate({ role }: { role: 'candidate' | 'rekey' }) {
@@ -58,7 +58,7 @@ export function Candidate({ role }: { role: 'candidate' | 'rekey' }) {
     }
   };
   const restart = async () => {
-    if (!confirm(t('fs.restartConfirm'))) return;
+    if (!(await askConfirm(t('fs.restartConfirm'), t('fs.restart'), true))) return;
     await store.clearPending(app.site!.site);
     setState({ pending: undefined });
   };
@@ -94,6 +94,7 @@ export function Candidate({ role }: { role: 'candidate' | 'rekey' }) {
                     <span>{proposal ? <a href={`#/p/${proposal.event.id}`}>{proposalLabel(app.site!.name, proposal.number)} · {statusText(proposal, s.now)}</a> : t('cand.notYet')}</span>
                   </div>
                   <div class="kv"><span>{t('cand.listed')}</span><span>{t('cand.notYet')}</span></div>
+                  {proposal?.status === 'passed' && <p class="small">{t('cand.waitList')}</p>}
                   {proposal && ['rejected', 'no_quorum'].includes(proposal.status) && <p class="warn">{t('cand.rejected')}</p>}
                 </>
               ) : (
@@ -101,6 +102,8 @@ export function Candidate({ role }: { role: 'candidate' | 'rekey' }) {
                   <div class="kv"><span>{t('cn.rekeys')}</span><span>{rekey ? t('cn.approvals', { n: rekey.endorsers.length, m }) : t('cand.notYet')}</span></div>
                   {rekey?.needsSecondVerify && <span class="small">{t('cn.rekeyNeedsVerify')}</span>}
                   <div class="kv"><span>{t('cand.listed')}</span><span>{t('cand.notYet')}</span></div>
+                  {rekey?.effectiveAt !== undefined && <p class="small">{t('cand.waitList')}</p>}
+                  <p class="small">{t('lost.dontSignIn')}</p>
                 </>
               )}
             </div>

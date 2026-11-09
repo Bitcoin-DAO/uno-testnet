@@ -60,7 +60,8 @@ Questa carta dice a cosa serve UNO e come lavoriamo insieme. Ogni membro la acce
 ## Articolo 6 · Proposte e voto
 
 1. Ogni membro può fare una proposta. Il testo vincolante è il riassunto della proposta, al massimo 500 caratteri; un link al testo completo è facoltativo.
-2. Si vota sì, no o astensione per [7] giorni interi. Ogni voto è firmato e pubblico, e si può cambiare fino alla chiusura.
+2. Si vota sì, no o astensione per [3] giorni interi. Ogni voto è firmato e pubblico, e si può cambiare fino alla chiusura.
+   **Modalità prova.** Alla fondazione, la DAO può partire in modalità prova, con voti di 10 minuti, per provare tutti i passaggi in poco tempo. Si passa ai voti di [3] giorni con un voto sulle regole; i membri, l'archivio e la tesoreria restano gli stessi.
 3. Una proposta è valida se vota almeno [un terzo] di chi può votare; l'astensione conta per il quorum.
 4. **Maggioranza semplice** per pagamenti, dichiarazioni e nuovi membri. **Due terzi** per esclusioni, modifiche delle regole, cambi del Consiglio, modifiche a questa carta e chiusura della DAO.
 5. Alla chiusura un membro del Consiglio firma il conteggio finale, che fissa il risultato e il numero della proposta.

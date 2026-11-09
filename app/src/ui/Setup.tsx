@@ -1,8 +1,9 @@
 // Prepare the founding (protocol 3.5): basics, council, founders, publish and approve.
+import { periodText, ruleValue } from './Proposals';
 import { useEffect, useState } from 'preact/hooks';
 import { publishSigned, sync, useApp } from '../app';
 import { fmtSats, t } from '../i18n';
-import { buildGenesis, isPlaceholder } from '../core/config';
+import { buildGenesis, isPlaceholder, PRACTICE_VOTE_DAYS, isPracticeVotes } from '../core/config';
 import { buildDescriptor, parseKeyOrigin } from '../core/descriptor';
 import { KIND, sign, template } from '../core/events';
 import { parseFounderCode, type FounderCode } from '../core/identity';
@@ -95,6 +96,8 @@ export function Setup() {
   };
 
   const charterSha256 = sha256Hex(charterText);
+  const liveDays = isPracticeVotes(site.rules.votingPeriodDays) ? 3 : site.rules.votingPeriodDays;
+  const votingDays = s.votingPeriodDays ?? site.rules.votingPeriodDays;
   let genesis: ReturnType<typeof buildGenesis> | undefined;
   let buildErr: string | undefined;
   try {
@@ -107,6 +110,7 @@ export function Setup() {
         threshold: s.threshold,
         descriptor: buildDescriptor(s.threshold, s.council, site.network),
         charterSha256,
+        votingPeriodDays: s.votingPeriodDays,
       });
     }
   } catch (e) {
@@ -161,10 +165,21 @@ export function Setup() {
             </div>
             <div class="card">
               <h3>{t('setup.rules')}</h3>
-              <div class="kv"><span>{t('setup.voting')}</span><span>{t('setup.days', { n: site.rules.votingPeriodDays })}</span></div>
+              {site.network !== 'mainnet' && !locked ? (
+                // Testnet DAOs choose: practice (10-minute votes, to rehearse everything in a sitting) or live. Changed later by a rule-change vote.
+                <fieldset class="stack" style="border:0;padding:0;margin:0;gap:6px">
+                  <legend class="small" style="margin-bottom:4px">{t('setup.voting')}</legend>
+                  <label class="check"><input type="radio" name="votes" checked={isPracticeVotes(votingDays)} onChange={() => save({ ...s, votingPeriodDays: PRACTICE_VOTE_DAYS })} />{t('setup.votesPractice')}</label>
+                  <label class="check"><input type="radio" name="votes" checked={!isPracticeVotes(votingDays)} onChange={() => save({ ...s, votingPeriodDays: liveDays })} />{t('setup.votesLive', { period: periodText(liveDays) })}</label>
+                  <span class="small">{t('setup.votesLater')}</span>
+                </fieldset>
+              ) : (
+                <div class="kv"><span>{t('setup.voting')}</span><span>{periodText(votingDays)}</span></div>
+              )}
               <div class="kv"><span>{t('setup.quorum')}</span><span>{t('setup.quorumVal', { q: site.rules.quorum })}</span></div>
               <div class="kv"><span>{t('setup.payouts')}</span><span>{cadenceOf(site.rules.payoutRound) === 'weekly' ? t('setup.weekly') : t('setup.monthly')}</span></div>
               <div class="kv"><span>{t('setup.maxFee')}</span><span>{site.rules.maxFeeRateSatVb} sat/vB</span></div>
+          <div class="kv"><span>{t('fee.label')}</span><span>{ruleValue('feePolicy', site.rules.feePolicy)}</span></div>
               <div class="kv"><span>{t('setup.cap')}</span><span>{fmtSats(site.rules.treasuryCapSats)} sats</span></div>
               <div class="kv"><span>{t('setup.charter')}</span><span class="mono">{charterSha256.slice(0, 8)} …</span></div>
             </div>
@@ -184,6 +199,7 @@ export function Setup() {
                 <button type="button" class="btn-head" style="color:var(--ink);border-color:var(--field)" disabled={locked || s.threshold >= s.council.length} onClick={() => save({ ...s, threshold: s.threshold + 1 })}>+</button>
               </span>
             </div>
+            {s.council.length > 0 && s.threshold >= s.council.length && <p class="warnbox">{t('setup.noSpare', { n: s.council.length })}</p>}
             <div class="card list">
               {s.council.map((c, i) => (
                 <CouncilRow
@@ -259,7 +275,20 @@ export function Setup() {
               <div class="card">
                 <p class="ok">{t('setup.published')}</p>
                 <strong>{t('setup.endorsements', { n: candidate?.endorsers.length ?? 1, m: s.threshold })}</strong>
+                {candidate && (() => {
+                  // Who has approved, and who is still to: the founders can see where the founding stands.
+                  const by = new Set(candidate.endorsers.map(e => e.key));
+                  const done = candidate.config.council.filter(c => by.has(c.identityKey)).map(c => c.label);
+                  const todo = candidate.config.council.filter(c => !by.has(c.identityKey)).map(c => c.label);
+                  return (
+                    <>
+                      {done.length > 0 && <p class="small">{t('setup.approvedBy', { names: done.join(', ') })}</p>}
+                      {todo.length > 0 && <p class="small">{t('setup.notYetBy', { names: todo.join(', ') })}</p>}
+                    </>
+                  );
+                })()}
                 <p class="small">{t('setup.endorseHow', { dao: s.name })}</p>
+                <p class="small">{t('setup.whatNext', { m: s.threshold })}</p>
               </div>
             )}
             {msg && <p class="warnbox">{msg}</p>}

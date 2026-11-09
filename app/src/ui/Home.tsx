@@ -1,5 +1,5 @@
 import { useState } from 'preact/hooks';
-import { refreshTreasury, useApp } from '../app';
+import { chainApis, refreshTreasury, useApp } from '../app';
 import { fmtDate, fmtSats, t } from '../i18n';
 import { Address, Footer, Header, Qr, go } from './parts';
 import { Join } from './Join';
@@ -7,6 +7,8 @@ import { ProposalCard } from './Proposals';
 import { councilTodo } from './Council';
 import { cadenceOf, roundDatesAfter } from '../core/time';
 import { proposalLabel, type RoundView } from '../core/state';
+import { parseDescriptor, treasuryAddress } from '../core/descriptor';
+import { explorerOf } from '../core/chain';
 
 export function Home() {
   const app = useApp();
@@ -18,7 +20,7 @@ export function Home() {
   const m = current.threshold;
   const cap = current.rules.treasuryCapSats;
   const atCap = tr ? tr.balance >= cap : false;
-  const explorer = (cfg.chainApi[0] ?? '').replace(/\/api\/?$/, '');
+  const explorer = explorerOf(chainApis()[0] ?? '');
   const open = app.dao!.proposals.filter(p => p.status === 'open').reverse();
   const round = app.dao!.rounds.find(r => r.status === 'open');
   const waiting = app.dao!.proposals.filter(p => app.dao!.payments.get(p.event.id)?.status === 'waiting' && p.content.type === 'payout');
@@ -37,8 +39,16 @@ export function Home() {
               <div class="balance">{fmtSats(tr.balance)} <small>sats</small></div>
               {tr.unconfirmed !== 0 && <span class="small">{t('home.unconfirmed', { amount: fmtSats(tr.unconfirmed) })}</span>}
               {cfg.network !== 'mainnet' && <span class="small">{t('home.testValue')}</span>}
+              <span class="small">
+                {app.treasuryAt && t('home.readAt', { time: fmtTime(app.treasuryAt, app.lang) })}
+                {app.treasuryAt && tr?.source && ` · ${t('home.via', { source: tr.source })}`}
+                {app.treasuryLoading ? ` · ${t('home.updating')}` : app.treasuryError ? ` · ${t('home.notUpdated')}` : ''}
+              </span>
+              {app.treasuryError && !app.treasuryLoading && (
+                <button type="button" class="btn link" onClick={() => refreshTreasury()}>{t('retry')}</button>
+              )}
             </>
-          ) : app.treasuryError ? (
+          ) : app.treasuryError && !app.treasuryLoading ? (
             <>
               <p class="error">{t('home.chainError', { msg: app.treasuryError })}</p>
               <button type="button" class="btn secondary" onClick={() => refreshTreasury()}>{t('retry')}</button>
@@ -56,13 +66,15 @@ export function Home() {
           </div>
         </section>
 
+        {!tr && <Donate address={firstAddress(cfg.descriptor, cfg.network)} />}
+
         {tr && (atCap ? (
           <section class="card">
             <h2>{t('home.donate')}</h2>
             <p class="warn">{tr.balance > cap ? t('home.overCap', { cap: fmtSats(cap) }) : t('home.capReached', { cap: fmtSats(cap) })}</p>
           </section>
         ) : (
-          <Donate address={tr.donationAddress} />
+          <Donate address={tr.donationAddress} first={tr.balance === 0 && tr.movements.length === 0} testnet={cfg.testnetTreasury?.name} />
         ))}
 
         {app.isCouncil && app.me && councilTodo(app.dao!, app.me.person) > 0 && (
@@ -82,6 +94,7 @@ export function Home() {
             <span class="small">{t('home.nextRound')}</span>
             <strong style="font-size:22px">{nextRoundDate}</strong>
             <span class="small">{t('home.nextRoundText', { n: waiting.length, sats: fmtSats(waitingSats) })}</span>
+            {waiting.length > 0 && <span class="small">{t('home.roundEarly')}</span>}
           </div>
         ))}
 
@@ -138,7 +151,16 @@ function roundTitle(r: RoundView) {
   return `${t('home.roundLabel', { round: r.content.round })} · ${nums.join(', ')}`;
 }
 
-function Donate({ address }: { address: string }) {
+function fmtTime(ms: number, lang: string): string {
+  return new Intl.DateTimeFormat(lang === 'en' ? 'en-GB' : 'it-IT', { hour: '2-digit', minute: '2-digit', day: 'numeric', month: 'short' }).format(new Date(ms));
+}
+
+/** The treasury's first receive address, worked out on the phone: funds sent to any treasury address are found later. */
+function firstAddress(descriptor: string, network: Parameters<typeof parseDescriptor>[1]): string {
+  return treasuryAddress(parseDescriptor(descriptor, network), network, 0, 0).address;
+}
+
+function Donate({ address, first, testnet }: { address: string; first?: boolean; testnet?: string }) {
   const [copied, setCopied] = useState(false);
   const copy = async () => {
     try {
@@ -151,7 +173,9 @@ function Donate({ address }: { address: string }) {
   };
   return (
     <section class="card">
-      <h2>{t('home.donate')}</h2>
+      <h2>{first ? t('home.fundTitle') : t('home.donate')}</h2>
+      {first && <p class="small">{t('home.fundText')}</p>}
+      {first && testnet && <p class="note">{t('home.fundTestnet', { name: testnet })}</p>}
       <div class="qr-wrap"><Qr text={`bitcoin:${address}`} size={200} label={address} /></div>
       <Address value={address} />
       <button type="button" class="btn dark" onClick={copy}>{copied ? t('home.copied') : t('home.copy')}</button>

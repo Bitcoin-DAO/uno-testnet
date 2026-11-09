@@ -6,7 +6,9 @@ import { KIND } from '../core/events';
 import { DUST, proposalSchemaError, validAddress, type ProposalContent, type ProposalType } from '../core/state';
 import { cadenceOf } from '../core/time';
 import { Footer, Header, errText, go } from './parts';
-import { EDITABLE_RULES, ruleLabel, typeLabel } from './Proposals';
+import { EDITABLE_RULES, periodText, ruleLabel, ruleValue, typeLabel } from './Proposals';
+import { PRACTICE_VOTE_DAYS } from '../core/config';
+import { feePolicyOf } from '../core/chain';
 
 const TYPES: ProposalType[] = ['payout', 'statement', 'remove_member', 'change_rules', 'close'];
 
@@ -48,9 +50,12 @@ export function NewProposal() {
   const addrError = addr && (!validAddress(addr, network) ? t('np.addressBad', { network }) : s.isTreasuryAddress(addr) ? t('np.addressTreasury') : undefined);
   const amt = Number(amount);
   const amtError = amount && !(Number.isInteger(amt) && amt > DUST) ? t('np.amountBad', { dust: DUST }) : undefined;
-  const current = s.rules?.[rule];
+  const stored = s.rules?.[rule];
+  // A rule missing from older settings shows its default; the change records what is actually stored.
+  const current = rule === 'feePolicy' ? feePolicyOf(s.rules ?? {}) : stored;
   const parsedValue = (() => {
     if (rule === 'payoutRound') return value === 'weekly' || value === 'monthly' ? value : undefined;
+    if (rule === 'feePolicy') return value === 'fast' || value === 'economical' ? value : undefined;
     if (rule === 'quorum') return /^\d+\/\d+$/.test(value.trim()) ? value.trim() : undefined;
     const n = Number(value);
     return value.trim() && Number.isFinite(n) && n > 0 ? n : undefined;
@@ -59,7 +64,7 @@ export function NewProposal() {
   let payload: Record<string, unknown> = {};
   if (type === 'payout') payload = { recipient: recipient.trim(), outputs: [{ address: addr, amount_sat: amt, ...(forMember ? { member: forMember } : {}) }] };
   if (type === 'remove_member') payload = { member_key: member, reason: reason.trim() };
-  if (type === 'change_rules') payload = { changes: [{ path: `rules.${rule}`, from: current, to: parsedValue }] };
+  if (type === 'change_rules') payload = { changes: [{ path: `rules.${rule}`, from: stored ?? null, to: parsedValue }] };
   if (type === 'close') payload = { destination: addr };
   const content: ProposalContent = {
     type, title: title.trim(), summary: summary.trim(), lang: app.lang, payload,
@@ -166,8 +171,26 @@ export function NewProposal() {
                 {EDITABLE_RULES.map(r => <option value={r}>{ruleLabel(r)}</option>)}
               </select>
             </label>
-            <span class="small">{t('np.current', { v: String(current) })}</span>
-            {rule === 'payoutRound' ? (
+            <span class="small">{t('np.current', { v: ruleValue(rule, current) })}</span>
+            {rule === 'votingPeriodDays' ? (
+              // Vote length as members think of it: practice minutes or whole days.
+              <label class="field">
+                {t('np.newValue')}
+                <select value={value} onChange={e => setValue((e.target as HTMLSelectElement).value)} style="min-height:48px;border:1px solid var(--field);border-radius:8px;padding:0 12px;font:inherit;font-size:16px;background:#fff">
+                  <option value="">—</option>
+                  {[PRACTICE_VOTE_DAYS, 1, 3, 7].map(d => <option value={String(d)}>{periodText(d)}</option>)}
+                </select>
+              </label>
+            ) : rule === 'feePolicy' ? (
+              <label class="field">
+                {t('np.newValue')}
+                <select value={value} onChange={e => setValue((e.target as HTMLSelectElement).value)} style="min-height:48px;border:1px solid var(--field);border-radius:8px;padding:0 12px;font:inherit;font-size:16px;background:#fff">
+                  <option value="">—</option>
+                  <option value="fast">{t('fee.fast')}</option>
+                  <option value="economical">{t('fee.economical')}</option>
+                </select>
+              </label>
+            ) : rule === 'payoutRound' ? (
               <label class="field">
                 {t('np.newValue')}
                 <select value={value} onChange={e => setValue((e.target as HTMLSelectElement).value)} style="min-height:48px;border:1px solid var(--field);border-radius:8px;padding:0 12px;font:inherit;font-size:16px;background:#fff">

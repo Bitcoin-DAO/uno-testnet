@@ -46,6 +46,12 @@ export function Join() {
       <Header />
       <main>
         <h1>{t('join.title', { dao })}</h1>
+        {app.pending && app.pending.role !== 'founder' && (
+          // A sign-up or key replacement is under way on this phone: its page is where it finishes, not Sign in.
+          <a class="note" href={app.pending.role === 'rekey' ? '#/lost' : '#/candidate'}>
+            <strong>{t(app.pending.role === 'rekey' ? 'join.pendingRekey' : 'join.pendingCand', { name: app.pending.name })}</strong> {t('join.pendingGo')}
+          </a>
+        )}
         <p class="lead">{t('join.intro')}</p>
         <div class="note"><strong>{t('join.howTitle')}</strong> {t('join.how')}</div>
         <button type="button" class="btn primary" onClick={() => go('/candidate')}>{t('join.become')}</button>

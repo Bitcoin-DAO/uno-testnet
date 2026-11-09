@@ -32,6 +32,8 @@ export interface Rules {
   timezone: string;
   lapseAfterRounds: number;
   maxFeeRateSatVb: number;
+  /** How rounds choose their fee: "fast" (the next block, the default) or "economical" (about an hour). */
+  feePolicy?: 'fast' | 'economical';
   treasuryCapSats: number;
   remoteVerification: Record<string, unknown>;
   minimumAge: number;
@@ -59,6 +61,8 @@ export interface DaoConfig {
   relays: string[];
   chainApi: string[];
   rules: Rules;
+  /** Confirmations a round's transaction needs before the council publishes its receipt (3 if unset), so a reorg cannot leave a false receipt. */
+  receiptConfirmations?: number;
   /** Practice and testnet stages: the organisation's testnet4 wallet that funds them and gets the coins back at closing. */
   testnetTreasury?: { name: string; address: string };
   branding?: { logo: string | null; colours?: Record<string, string> };
@@ -88,6 +92,8 @@ export function buildGenesis(site: SiteConfig, fill: {
   threshold: number;
   descriptor: string;
   charterSha256: string;
+  /** The vote length chosen at founding, if not the site file's. */
+  votingPeriodDays?: number;
 }): DaoConfig {
   const { daoId: _ignored, ...base } = site;
   return {
@@ -100,6 +106,10 @@ export function buildGenesis(site: SiteConfig, fill: {
     descriptor: fill.descriptor,
     relays: usable(site.relays),
     chainApi: usable(site.chainApi),
-    rules: { ...site.rules, charterSha256: fill.charterSha256 },
+    rules: { ...site.rules, ...(fill.votingPeriodDays ? { votingPeriodDays: fill.votingPeriodDays } : {}), charterSha256: fill.charterSha256 },
   };
 }
+
+/** Practice votes last 10 minutes; anything under a day counts as practice. */
+export const PRACTICE_VOTE_DAYS = 10 / 1440;
+export const isPracticeVotes = (days: number) => days < 1;
